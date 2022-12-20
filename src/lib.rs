@@ -22,9 +22,11 @@ pub fn derive_builder(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(ConsumingBuilder)]
 pub fn derive_consuming_builder(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);
-    let _input = match DeriveData::new(input, "consuming_builder") {
+    let input = match DeriveData::new(input, "consuming_builder") {
         Ok(i) => i,
         Err(e) => return e.to_compile_error().into(),
     };
-    todo!()
+    derive_consuming_builder::derive_consuming_builder(input)
+        .unwrap_or_else(|e| syn::Error::to_compile_error(&e))
+        .into()
 }

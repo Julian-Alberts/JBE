@@ -41,7 +41,10 @@ fn build_struct(
         )
         .collect();
     syn::ItemStruct {
-        attrs: vec![construct_attribute("derive", &["Default"])],
+        attrs: vec![
+            construct_attribute("derive", &["Default"]),
+            construct_doc_comment("Test comment"),
+        ],
         fields: syn::Fields::Named(syn::FieldsNamed {
             named: fields,
             brace_token: Default::default(),
@@ -98,13 +101,25 @@ fn build_impl(
         |prev,
          Field {
              ident,
-             default: _,
+             default,
              ty,
              is_optional,
          }| {
             let ty = if let Some(ty) = is_optional { ty } else { ty };
+
+            let comment_is_optional = if is_optional.is_some() || default.is_some() {
+                "This value is optional"
+            } else {
+                "This value is required"
+            };
+            let comments = [
+                construct_doc_comment(format!("Set the {ident} to the given value.").as_str()),
+                construct_doc_comment(comment_is_optional),
+            ];
+
             quote::quote!(
                 #prev
+                #(#comments)*
                 pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
                     self.#ident = Some(#ident);
                     self
@@ -133,26 +148,53 @@ fn build_impl(
                             #prev
                             #ident: self.#ident.clone(),
                         )
-                    }
-                    else {
-                    let error_variant_error = field_ident_to_error_variant_ident(ident);
-                    quote::quote!(
-                        #prev
-                        #ident: match self.#ident.clone() {
-                            Some(#ident) => #ident,
-                            None => return Err(#error_ident::#error_variant_error)
-                        },
-                    )
+                    } else {
+                        let error_variant_error = field_ident_to_error_variant_ident(ident);
+                        quote::quote!(
+                            #prev
+                            #ident: match self.#ident.clone() {
+                                Some(#ident) => #ident,
+                                None => return Err(#error_ident::#error_variant_error)
+                            },
+                        )
                     }
                 }
             },
         );
+        let try_build_comments = [
+            construct_doc_comment(format!("Construct a new {struct_ident} instance. This function returns an error if not all required values are set").as_str()),
+            construct_doc_comment("# Required values"),
+            construct_doc_comment(
+                fields
+                    .iter()
+                    .filter(|f| f.is_optional.is_none() && f.default.is_none())
+                    .map(|f| format!("* {}\n", f.ident.to_string()))
+                    .collect::<String>()
+                    .as_str(),
+            ),
+        ];
+        let build_comments = [
+            construct_doc_comment(format!("Construct a new {struct_ident} instance.").as_str()),
+            construct_doc_comment("# Required values"),
+            construct_doc_comment(
+                fields
+                    .iter()
+                    .filter(|f| f.is_optional.is_none() && f.default.is_none())
+                    .map(|f| format!("* {}\n", f.ident.to_string()))
+                    .collect::<String>()
+                    .as_str(),
+            ),
+            construct_doc_comment("# Panics"),
+            construct_doc_comment("This function may panic if not all required values are set."),
+        ];
         quote::quote!(
+            #(#try_build_comments)*
             pub fn try_build(&self) -> Result<#struct_ident, #error_ident> {
                 Ok(#struct_ident {
                     #build_body
                 })
             }
+            #(#build_comments)*
             pub fn build(&self) -> #struct_ident {
                 self.try_build().unwrap()
             }
@@ -208,13 +250,16 @@ fn build_error_impl(
         ..
     }: &DeriveData,
 ) -> proc_macro2::TokenStream {
-    let arms = fields.into_iter().filter(|f| f.default.is_none() && f.is_optional.is_none()).map(|f| {
-        let variant = field_ident_to_error_variant_ident(&f.ident);
-        let field_ident = &f.ident;
-        quote::quote!(
-            Self::#variant => write!(f, stringify!(Error #field_ident not set)),
-        )
-    });
+    let arms = fields
+        .into_iter()
+        .filter(|f| f.default.is_none() && f.is_optional.is_none())
+        .map(|f| {
+            let variant = field_ident_to_error_variant_ident(&f.ident);
+            let field_ident = &f.ident;
+            quote::quote!(
+                Self::#variant => write!(f, stringify!(Error #field_ident not set)),
+            )
+        });
 
     quote::quote!(
         impl std::fmt::Display for #error_ident {
@@ -268,6 +313,22 @@ fn construct_attribute(name: &str, args: &[&str]) -> syn::Attribute {
         },
         style: syn::AttrStyle::Outer,
         tokens: Default::default(),
+    }
+}
+
+fn construct_doc_comment(comment: &str) -> syn::Attribute {
+    syn::Attribute {
+        pound_token: Default::default(),
+        style: syn::AttrStyle::Outer,
+        bracket_token: Default::default(),
+        path: syn::Path {
+            leading_colon: None,
+            segments: syn::punctuated::Punctuated::from_iter([syn::PathSegment {
+                ident: syn::Ident::new("doc", proc_macro2::Span::call_site()),
+                arguments: Default::default(),
+            }]),
+        },
+        tokens: quote::quote!(= #comment),
     }
 }
 
