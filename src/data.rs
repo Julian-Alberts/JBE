@@ -12,6 +12,12 @@ pub struct Fields {
     pub fields: Vec<Field>,
 }
 
+impl AsRef<[Field]> for Fields {
+    fn as_ref(&self) -> &[Field] {
+        &self.fields
+    }
+}
+
 pub struct Field {
     pub ident: syn::Ident,
     pub default: Option<syn::Expr>,

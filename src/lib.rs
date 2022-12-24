@@ -3,9 +3,12 @@ use proc_macro::TokenStream;
 use syn::DeriveInput;
 
 mod attr;
+mod builder_error_enum;
+mod builder_struct;
 mod data;
 mod derive_builder;
 mod derive_consuming_builder;
+mod syn_attribute_helper;
 
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive_builder(input: TokenStream) -> TokenStream {
