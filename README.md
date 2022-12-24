@@ -18,11 +18,11 @@ fn main() {
 
 ## Macros
 ### Builder
-By default the builder is named `<struct name>Builder`.
-For each property of the struct a Builder has a function with the same name.
-To build a builder has two different functions `build` and `try_build`. 
+By default, the builder is named `<struct name>Builder`.
+For each property of the struct, a Builder has a function with the same name.
+For building, each builder has two different functions `build` and `try_build`. 
 `build` panics if not all required values are set. 
-In contrast `try_build` can return an error. By default the error is named `<builder name>Error`.
+In contrast, `try_build` can return an error. By default, the error is named `<builder name>Error`.
 
 You can change the default identifiers like this:
 ```rust
