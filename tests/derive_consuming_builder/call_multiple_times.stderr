@@ -1,0 +1,10 @@
+error[E0382]: use of moved value: `builder`
+  --> tests/derive_consuming_builder/call_multiple_times.rs:19:16
+   |
+12 |     let builder = UserBuilder::default().email(String::from("jon@example.com"));
+   |         ------- move occurs because `builder` has type `UserBuilder`, which does not implement the `Copy` trait
+13 |     let user = builder.build(10, String::from("Jon"));
+   |                ------- value moved here
+...
+19 |     let user = builder.build(11, String::from("Jon2"));
+   |                ^^^^^^^ value used here after move

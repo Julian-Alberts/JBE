@@ -1,8 +1,9 @@
 use proc_macro2::TokenStream;
 
 use crate::{
+    builder_error_enum::field_ident_to_error_variant_ident,
     data::Field,
-    syn_attribute_helper::{construct_attribute, construct_doc_comment}, builder_error_enum::field_ident_to_error_variant_ident,
+    syn_attribute_helper::{construct_attribute, construct_doc_comment},
 };
 
 pub fn build_struct(
@@ -78,10 +79,29 @@ fn generate_new_builder_field(ident: syn::Ident, ty: syn::Type) -> syn::Field {
 pub fn build_impl(
     struct_ident: &syn::Ident,
     builder_ident: &syn::Ident,
-    fields: &[Field],
+    setter_attributes: &[Field],
+    required_build_fields: &[Field],
     error_ident: &syn::Ident,
+    is_consuming: bool,
 ) -> TokenStream {
-    let setter = fields.into_iter().fold(
+    let setter = build_setter_functions(setter_attributes, is_consuming);
+    let build = build_builder_functions(
+        struct_ident,
+        setter_attributes,
+        required_build_fields,
+        error_ident,
+        is_consuming,
+    );
+    quote::quote!(
+        impl #builder_ident {
+            #setter
+            #build
+        }
+    )
+}
+
+fn build_setter_functions(fields: &[Field], is_consuming: bool) -> proc_macro2::TokenStream {
+    fields.into_iter().fold(
         proc_macro2::TokenStream::new(),
         |prev,
          Field {
@@ -101,56 +121,110 @@ pub fn build_impl(
                 construct_doc_comment(format!("Set the {ident} to the given value.").as_str()),
                 construct_doc_comment(comment_is_optional),
             ];
-
+            let (receiver, return_ty) = if is_consuming {
+                (quote::quote!(mut self), quote::quote!(Self))
+            } else {
+                (
+                    quote::quote!(&mut self),
+                    quote::quote!(&mut Self),
+                )
+            };
             quote::quote!(
                 #prev
                 #(#comments)*
-                pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                pub fn #ident(#receiver, #ident: #ty) -> #return_ty {
                     self.#ident = Some(#ident);
                     self
                 }
             )
         },
+    )
+}
+
+fn build_builder_functions(
+    struct_ident: &syn::Ident,
+    setter_attributes: &[Field],
+    required_build_fields: &[Field],
+    error_ident: &syn::Ident,
+    is_consuming: bool,
+) -> proc_macro2::TokenStream {
+    let clone_fn = if is_consuming {
+        proc_macro2::TokenStream::new()
+    } else {
+        quote::quote!(.clone())
+    };
+    let build_body = setter_attributes.iter().fold(
+        proc_macro2::TokenStream::new(),
+        |prev,
+         Field {
+             ident,
+             default,
+             ty: _,
+             is_optional,
+         }| {
+            if let Some(default) = default {
+                quote::quote!(
+                    #prev
+                    #ident: self.#ident #clone_fn.unwrap_or_else(|| #default),
+                )
+            } else {
+                if is_optional.is_some() {
+                    quote::quote!(
+                        #prev
+                        #ident: self.#ident.clone(),
+                    )
+                } else {
+                    let error_variant_error = field_ident_to_error_variant_ident(ident);
+                    quote::quote!(
+                        #prev
+                        #ident: match self.#ident #clone_fn {
+                            Some(#ident) => #ident,
+                            None => return Err(#error_ident::#error_variant_error)
+                        },
+                    )
+                }
+            }
+        },
     );
-    let build = {
-        let build_body = fields.iter().fold(
+    let build_body = required_build_fields.iter().fold(build_body, |prev, Field { ident, default: _, ty: _, is_optional: _}| {
+        quote::quote!(
+            #prev
+            #ident: #ident,
+        )
+    });
+    if is_consuming {
+        let build_args = required_build_fields.iter().fold(
             proc_macro2::TokenStream::new(),
             |prev,
              Field {
                  ident,
-                 default,
-                 ty: _,
-                 is_optional,
+                 default: _,
+                 ty,
+                 is_optional: _,
              }| {
-                if let Some(default) = default {
-                    quote::quote!(
-                        #prev
-                        #ident: self.#ident.clone().unwrap_or_else(|| #default),
-                    )
-                } else {
-                    if is_optional.is_some() {
-                        quote::quote!(
-                            #prev
-                            #ident: self.#ident.clone(),
-                        )
-                    } else {
-                        let error_variant_error = field_ident_to_error_variant_ident(ident);
-                        quote::quote!(
-                            #prev
-                            #ident: match self.#ident.clone() {
-                                Some(#ident) => #ident,
-                                None => return Err(#error_ident::#error_variant_error)
-                            },
-                        )
-                    }
-                }
+                quote::quote!(
+                    #prev
+                    #ident: #ty,
+                )
             },
         );
+        let build_comments = [construct_doc_comment(
+            format!("Construct a new {struct_ident} instance.").as_str(),
+        )];
+        quote::quote!(
+            #(#build_comments)*
+            pub fn build(self, #build_args) -> #struct_ident {
+                #struct_ident {
+                    #build_body
+                }
+            }
+        )
+    } else {
         let try_build_comments = [
             construct_doc_comment(format!("Construct a new {struct_ident} instance. This function returns an error if not all required values are set").as_str()),
             construct_doc_comment("# Required values"),
             construct_doc_comment(
-                fields
+                setter_attributes
                     .iter()
                     .filter(|f| f.is_optional.is_none() && f.default.is_none())
                     .map(|f| format!("* {}\n", f.ident.to_string()))
@@ -162,7 +236,7 @@ pub fn build_impl(
             construct_doc_comment(format!("Construct a new {struct_ident} instance.").as_str()),
             construct_doc_comment("# Required values"),
             construct_doc_comment(
-                fields
+                setter_attributes
                     .iter()
                     .filter(|f| f.is_optional.is_none() && f.default.is_none())
                     .map(|f| format!("* {}\n", f.ident.to_string()))
@@ -173,22 +247,16 @@ pub fn build_impl(
             construct_doc_comment("This function may panic if not all required values are set."),
         ];
         quote::quote!(
-            #(#try_build_comments)*
-            pub fn try_build(&self) -> Result<#struct_ident, #error_ident> {
-                Ok(#struct_ident {
-                    #build_body
-                })
-            }
-            #(#build_comments)*
-            pub fn build(&self) -> #struct_ident {
-                self.try_build().unwrap()
-            }
+                #(#try_build_comments)*
+                pub fn try_build(&self) -> Result<#struct_ident, #error_ident> {
+                    Ok(#struct_ident {
+                        #build_body
+                    })
+                }
+                #(#build_comments)*
+                pub fn build(&self) -> #struct_ident {
+                    self.try_build().unwrap()
+                }
         )
-    };
-    quote::quote!(
-        impl #builder_ident {
-            #setter
-            #build
-        }
-    )
+    }
 }

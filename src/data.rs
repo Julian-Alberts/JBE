@@ -18,6 +18,7 @@ impl AsRef<[Field]> for Fields {
     }
 }
 
+#[derive(Clone)]
 pub struct Field {
     pub ident: syn::Ident,
     pub default: Option<syn::Expr>,

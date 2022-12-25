@@ -22,7 +22,7 @@ pub fn derive_builder(input: TokenStream) -> TokenStream {
         .into()
 }
 
-#[proc_macro_derive(ConsumingBuilder)]
+#[proc_macro_derive(ConsumingBuilder, attributes(consuming_builder))]
 pub fn derive_consuming_builder(input: TokenStream) -> TokenStream {
     let input = syn::parse_macro_input!(input as DeriveInput);
     let input = match DeriveData::new(input, "consuming_builder") {
