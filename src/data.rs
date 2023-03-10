@@ -4,6 +4,7 @@ pub struct DeriveData {
     pub struct_ident: syn::Ident,
     pub builder_ident: syn::Ident,
     pub error_ident: syn::Ident,
+    pub copy_on_build: bool,
     pub generics: syn::Generics,
     pub fields: Fields,
 }
@@ -29,6 +30,7 @@ pub struct Field {
 pub struct StructAttrs {
     builder_ident: Option<syn::Ident>,
     error_ident: Option<proc_macro2::Ident>,
+    copy: bool
 }
 
 pub struct FieldAttrs {
@@ -87,6 +89,7 @@ impl DeriveData {
             struct_ident,
             fields,
             generics,
+            copy_on_build: attrs.copy
         })
     }
 }
@@ -102,6 +105,7 @@ impl StructAttrs {
                 return Ok(Self {
                     builder_ident: None,
                     error_ident: None,
+                    copy: false
                 })
             }
         };
@@ -119,9 +123,18 @@ impl StructAttrs {
             Some(Err(e)) => return Err(e),
             None => None,
         };
+
+        let copy = builder_data.find_field::<syn::LitBool>("copy");
+        let copy = match copy {
+            Some(Ok(syn::LitBool { value, span: _ })) => value,
+            Some(Err(e)) => return Err(e),
+            None => false,
+        };
+
         Ok(Self {
             builder_ident,
             error_ident,
+            copy
         })
     }
 }

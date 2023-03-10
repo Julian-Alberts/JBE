@@ -83,6 +83,7 @@ pub fn build_impl(
     required_build_fields: &[Field],
     error_ident: &syn::Ident,
     is_consuming: bool,
+    copy_on_build: bool
 ) -> TokenStream {
     let setter = build_setter_functions(setter_attributes, is_consuming);
     let build = build_builder_functions(
@@ -91,6 +92,7 @@ pub fn build_impl(
         required_build_fields,
         error_ident,
         is_consuming,
+        copy_on_build
     );
     quote::quote!(
         impl #builder_ident {
@@ -129,12 +131,20 @@ fn build_setter_functions(fields: &[Field], is_consuming: bool) -> proc_macro2::
                     quote::quote!(&mut Self),
                 )
             };
+            let fn_ident_with = syn::Ident::new(format!("with_{}", ident.to_string()).as_str(), ident.span());
+            let fn_ident_set = syn::Ident::new(format!("set_{}", ident.to_string()).as_str(), ident.span());
             quote::quote!(
                 #prev
                 #(#comments)*
-                pub fn #ident(#receiver, #ident: #ty) -> #return_ty {
+                #[must_use]
+                pub fn #fn_ident_with(#receiver, #ident: #ty) -> #return_ty {
                     self.#ident = Some(#ident);
                     self
+                }
+
+                #(#comments)*
+                pub fn #fn_ident_set(&mut self, #ident: #ty) {
+                    self.#ident = Some(#ident)
                 }
             )
         },
@@ -147,8 +157,9 @@ fn build_builder_functions(
     required_build_fields: &[Field],
     error_ident: &syn::Ident,
     is_consuming: bool,
+    copy_on_build: bool
 ) -> proc_macro2::TokenStream {
-    let clone_fn = if is_consuming {
+    let clone_fn = if is_consuming || !copy_on_build {
         proc_macro2::TokenStream::new()
     } else {
         quote::quote!(.clone())
@@ -168,10 +179,15 @@ fn build_builder_functions(
                     #ident: self.#ident #clone_fn.unwrap_or_else(|| #default),
                 )
             } else {
-                if is_optional.is_some() {
+                if is_optional.is_some() && copy_on_build {
                     quote::quote!(
                         #prev
                         #ident: self.#ident.clone(),
+                    )
+                } else if is_optional.is_some() && !copy_on_build {
+                    quote::quote!(
+                        #prev
+                        #ident: self.#ident,
                     )
                 } else {
                     let error_variant_error = field_ident_to_error_variant_ident(ident);
@@ -246,15 +262,20 @@ fn build_builder_functions(
             construct_doc_comment("# Panics"),
             construct_doc_comment("This function may panic if not all required values are set."),
         ];
+        let self_token = if copy_on_build {
+            quote::quote!(&self)
+        } else {
+            quote::quote!(self)
+        };
         quote::quote!(
                 #(#try_build_comments)*
-                pub fn try_build(&self) -> Result<#struct_ident, #error_ident> {
+                pub fn try_build(#self_token) -> Result<#struct_ident, #error_ident> {
                     Ok(#struct_ident {
                         #build_body
                     })
                 }
                 #(#build_comments)*
-                pub fn build(&self) -> #struct_ident {
+                pub fn build(#self_token) -> #struct_ident {
                     self.try_build().unwrap()
                 }
         )

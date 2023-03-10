@@ -44,6 +44,7 @@ pub fn build_error_impl(fields: &[Field], error_ident: &syn::Ident) -> proc_macr
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {
                     #(#arms)*
+                    _ => Ok(())
                 }
             }
         }
