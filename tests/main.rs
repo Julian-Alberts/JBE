@@ -8,4 +8,5 @@ fn derive_builder() {
     t.pass("tests/derive_builder/default_values.rs");
     t.pass("tests/derive_builder/generic.rs");
     t.pass("tests/derive_builder/generic_where.rs");
+    t.pass("tests/derive_builder/generic_default.rs");
 }

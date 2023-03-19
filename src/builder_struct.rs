@@ -83,8 +83,14 @@ pub fn build_impl(
     required_build_fields: &[Field],
     error_ident: &syn::Ident,
     copy_on_build: bool,
-    generics: syn::Generics
+    mut generics: syn::Generics
 ) -> TokenStream {
+    generics.params.iter_mut().for_each(|param| {
+        if let syn::GenericParam::Type(ty) = param {
+            ty.eq_token = None;
+            ty.default = None;
+        }
+    });
     let generics_without_bounds = generics.params.iter().map(|p| {
         if let syn::GenericParam::Type(ty) = p {
             syn::GenericParam::Type(
