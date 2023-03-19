@@ -1,7 +1,7 @@
 #[derive(Debug)]
 pub struct Attr {
     _brace_token: syn::token::Brace,
-    fields: syn::punctuated::Punctuated<AttrField, syn::Token!(,)>,
+    fields: syn::punctuated::Punctuated<AttrField, syn::Token![,]>,
 }
 
 impl Attr {
@@ -31,7 +31,7 @@ impl syn::parse::Parse for Attr {
 #[derive(Debug)]
 pub struct AttrField {
     ident: syn::Ident,
-    _colon_token: Option<syn::Token![:]>,
+    _colon_token: syn::Token![:],
     expr: proc_macro2::TokenStream,
 }
 

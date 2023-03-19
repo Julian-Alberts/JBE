@@ -1,6 +1,7 @@
 use jbe::Builder;
 
 #[derive(Builder, PartialEq, Debug)]
+#[builder({copy: true})]
 pub struct User {
     id: usize,
     name: String,
@@ -8,8 +9,8 @@ pub struct User {
 }
 
 fn main() {
-    let mut builder = UserBuilder::default();
-    let user = builder.id(10).name(String::from("Jon")).email(String::from("jon@example.com")).build();
+    let builder = UserBuilder::default();
+    let user = builder.with_id(10).with_name(String::from("Jon")).with_email(String::from("jon@example.com")).build();
     assert_eq!(user, User {
         id: 10,
         name: String::from("Jon"),

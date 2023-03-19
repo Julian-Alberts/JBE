@@ -82,27 +82,59 @@ pub fn build_impl(
     setter_attributes: &[Field],
     required_build_fields: &[Field],
     error_ident: &syn::Ident,
-    is_consuming: bool,
-    copy_on_build: bool
+    copy_on_build: bool,
+    generics: syn::Generics
 ) -> TokenStream {
-    let setter = build_setter_functions(setter_attributes, is_consuming);
+    let generics_without_bounds = generics.params.iter().map(|p| {
+        if let syn::GenericParam::Type(ty) = p {
+            syn::GenericParam::Type(
+                syn::TypeParam {
+                    attrs: ty.attrs.clone(),
+                    ident: ty.ident.clone(),
+                    colon_token: None,
+                    bounds: Default::default(),
+                    eq_token: Default::default(),
+                    default: Default::default(),
+                }
+            )
+        } else {
+            p.clone()
+        }
+    }).collect::<syn::punctuated::Punctuated<_,_>>();
+    let generics_without_bounds = syn::Generics {
+        lt_token: Default::default(),
+        params: generics_without_bounds,
+        gt_token: Default::default(),
+        where_clause: Default::default(),
+    };
+
+    let setter = build_setter_functions(setter_attributes);
     let build = build_builder_functions(
         struct_ident,
         setter_attributes,
         required_build_fields,
         error_ident,
-        is_consuming,
-        copy_on_build
+        copy_on_build,
+        &generics_without_bounds,
     );
+    let where_clause = if let Some(where_clause) = &generics.where_clause {
+        let mut ts = quote::quote!(where);
+        where_clause.predicates.iter().for_each(|p| {
+            ts.extend(quote::quote!(#p,))
+        });
+        Some(ts)
+    } else {
+        None
+    };
     quote::quote!(
-        impl #builder_ident {
+        impl #generics #builder_ident #generics_without_bounds #where_clause {
             #setter
             #build
         }
     )
 }
 
-fn build_setter_functions(fields: &[Field], is_consuming: bool) -> proc_macro2::TokenStream {
+fn build_setter_functions(fields: &[Field]) -> proc_macro2::TokenStream {
     fields.into_iter().fold(
         proc_macro2::TokenStream::new(),
         |prev,
@@ -123,21 +155,14 @@ fn build_setter_functions(fields: &[Field], is_consuming: bool) -> proc_macro2::
                 construct_doc_comment(format!("Set the {ident} to the given value.").as_str()),
                 construct_doc_comment(comment_is_optional),
             ];
-            let (receiver, return_ty) = if is_consuming {
-                (quote::quote!(mut self), quote::quote!(Self))
-            } else {
-                (
-                    quote::quote!(&mut self),
-                    quote::quote!(&mut Self),
-                )
-            };
+
             let fn_ident_with = syn::Ident::new(format!("with_{}", ident.to_string()).as_str(), ident.span());
             let fn_ident_set = syn::Ident::new(format!("set_{}", ident.to_string()).as_str(), ident.span());
             quote::quote!(
                 #prev
                 #(#comments)*
                 #[must_use]
-                pub fn #fn_ident_with(#receiver, #ident: #ty) -> #return_ty {
+                pub fn #fn_ident_with(mut self, #ident: #ty) -> Self {
                     self.#ident = Some(#ident);
                     self
                 }
@@ -156,10 +181,10 @@ fn build_builder_functions(
     setter_attributes: &[Field],
     required_build_fields: &[Field],
     error_ident: &syn::Ident,
-    is_consuming: bool,
-    copy_on_build: bool
+    copy_on_build: bool,
+    generics: &syn::Generics
 ) -> proc_macro2::TokenStream {
-    let clone_fn = if is_consuming || !copy_on_build {
+    let clone_fn = if !copy_on_build {
         proc_macro2::TokenStream::new()
     } else {
         quote::quote!(.clone())
@@ -208,76 +233,49 @@ fn build_builder_functions(
             #ident: #ident,
         )
     });
-    if is_consuming {
-        let build_args = required_build_fields.iter().fold(
-            proc_macro2::TokenStream::new(),
-            |prev,
-             Field {
-                 ident,
-                 default: _,
-                 ty,
-                 is_optional: _,
-             }| {
-                quote::quote!(
-                    #prev
-                    #ident: #ty,
-                )
-            },
-        );
-        let build_comments = [construct_doc_comment(
-            format!("Construct a new {struct_ident} instance.").as_str(),
-        )];
-        quote::quote!(
-            #(#build_comments)*
-            pub fn build(self, #build_args) -> #struct_ident {
-                #struct_ident {
-                    #build_body
-                }
-            }
-        )
+    
+    let try_build_comments = [
+        construct_doc_comment(format!("Construct a new {struct_ident} instance. This function returns an error if not all required values are set").as_str()),
+        construct_doc_comment("# Required values"),
+        construct_doc_comment(
+            setter_attributes
+                .iter()
+                .filter(|f| f.is_optional.is_none() && f.default.is_none())
+                .map(|f| format!("* {}\n", f.ident.to_string()))
+                .collect::<String>()
+                .as_str(),
+        ),
+    ];
+    let build_comments = [
+        construct_doc_comment(format!("Construct a new {struct_ident} instance.").as_str()),
+        construct_doc_comment("# Required values"),
+        construct_doc_comment(
+            setter_attributes
+                .iter()
+                .filter(|f| f.is_optional.is_none() && f.default.is_none())
+                .map(|f| format!("* {}\n", f.ident.to_string()))
+                .collect::<String>()
+                .as_str(),
+        ),
+        construct_doc_comment("# Panics"),
+        construct_doc_comment("This function may panic if not all required values are set."),
+    ];
+    let self_token = if copy_on_build {
+        quote::quote!(&self)
     } else {
-        let try_build_comments = [
-            construct_doc_comment(format!("Construct a new {struct_ident} instance. This function returns an error if not all required values are set").as_str()),
-            construct_doc_comment("# Required values"),
-            construct_doc_comment(
-                setter_attributes
-                    .iter()
-                    .filter(|f| f.is_optional.is_none() && f.default.is_none())
-                    .map(|f| format!("* {}\n", f.ident.to_string()))
-                    .collect::<String>()
-                    .as_str(),
-            ),
-        ];
-        let build_comments = [
-            construct_doc_comment(format!("Construct a new {struct_ident} instance.").as_str()),
-            construct_doc_comment("# Required values"),
-            construct_doc_comment(
-                setter_attributes
-                    .iter()
-                    .filter(|f| f.is_optional.is_none() && f.default.is_none())
-                    .map(|f| format!("* {}\n", f.ident.to_string()))
-                    .collect::<String>()
-                    .as_str(),
-            ),
-            construct_doc_comment("# Panics"),
-            construct_doc_comment("This function may panic if not all required values are set."),
-        ];
-        let self_token = if copy_on_build {
-            quote::quote!(&self)
-        } else {
-            quote::quote!(self)
-        };
-        quote::quote!(
-                #(#try_build_comments)*
-                pub fn try_build(#self_token) -> Result<#struct_ident, #error_ident> {
-                    Ok(#struct_ident {
-                        #build_body
-                    })
-                }
-                #(#build_comments)*
-                pub fn build(#self_token) -> #struct_ident {
-                    self.try_build().unwrap()
-                }
-        )
-    }
+        quote::quote!(self)
+    };
+    quote::quote!(
+            #(#try_build_comments)*
+            pub fn try_build(#self_token) -> Result<#struct_ident #generics, #error_ident> {
+                Ok(#struct_ident {
+                    #build_body
+                })
+            }
+            #(#build_comments)*
+            pub fn build(#self_token) -> #struct_ident #generics {
+                self.try_build().unwrap()
+            }
+    )
+    
 }

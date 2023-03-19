@@ -11,7 +11,7 @@ pub struct User {
 }
 
 fn main() {
-    let mut builder = UserBuilder::default();
-    let user = builder.id(10).name(String::from("Jon")).try_build();
+    let builder = UserBuilder::default();
+    let user = builder.with_id(10).with_name(String::from("Jon")).try_build();
     assert_eq!(user, Err(TestError::UnsetEmail));
 }

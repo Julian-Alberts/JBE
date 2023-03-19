@@ -16,8 +16,8 @@ pub fn derive_builder(data: DeriveData) -> syn::Result<TokenStream> {
         data.fields.as_ref(),
         &[],
         &data.error_ident,
-        false,
-        data.copy_on_build
+        data.copy_on_build,
+        data.generics
     )
     .to_tokens(&mut result);
     build_error(&data.fields.as_ref(), &data.error_ident).to_tokens(&mut result);
